@@ -1,4 +1,4 @@
-# Specyfikacja systemu — komunikacja i synchronizacja czasu
+[02_komunikacja_ESP32_MPU_rozdzial_3_6.md](https://github.com/user-attachments/files/33609268/02_komunikacja_ESP32_MPU_rozdzial_3_6.md)[01_uklad_ESP32_rozdzial_3_5.md](https://github.com/user-attachments/files/33609247/01_uklad_ESP32_rozdzial_3_5.md)# Specyfikacja systemu — komunikacja i synchronizacja czasu
 
 > Dotyczy zadania [#2 Przygotowanie specyfikacji](https://github.com/ZuberRS03/projekt_przejsciowy_PWR/issues/2).
 > Status: **wersja robocza 0.1** (2026-10-15). Pozycje oznaczone **[DO USTALENIA]** wymagają decyzji zespołu.
@@ -106,6 +106,122 @@ Statyczne adresy (bez DHCP — stałe IP upraszczają konfigurację i eliminują
 | 5000/udp | UDP | ESP32 → laptop | IMU, SHOT, SYNC_REPORT, STATUS |
 | 5001/udp | UDP | ESP32 ↔ RPi | SYNC_REQ / SYNC_RESP |
 | 5555/tcp | ZeroMQ PUSH/PULL | RPi → laptop | klatki wideo z metadanymi |
+
+### 3.5. Moduł pomiarowy repliki — układ ESP32
+
+#### 3.5.1. Elementy układu
+
+| Element | Model / parametr | Funkcja |
+|---------|------------------|---------|
+| Mikrokontroler | ESP32-C3 (płytka rozwojowa — dokładny wariant do potwierdzenia) | Odczyt czujników, timestampowanie i transmisja WiFi |
+| IMU | MPU-6050 | Pomiar przyspieszenia liniowego i prędkości kątowej w trzech osiach |
+| Optoizolator | model **[DO USTALENIA]** | Wykrywanie aktywacji obwodu spustu przy oddzieleniu elektrycznym obwodu repliki |
+| R1 | 1,5 kΩ | Ograniczenie prądu diody wejściowej optoizolatora |
+| R2 | 10 kΩ | Rezystor podciągający wejście sygnału spustu do 3,3 V |
+| Akumulator modułu | Li-Po 3,7 V, 300 mAh | Zasilanie elektroniki pomiarowej |
+| Akumulator repliki | Li-Po 7,4 V, 1600 mAh | Zasilanie napędu repliki i obwodu spustu |
+
+Wskaźnik laserowy stanowi **niezależny moduł**: nie jest zasilany ani sterowany przez ESP32, a jego obwód nie jest częścią schematu elektrycznego modułu pomiarowego. Kamera na Raspberry Pi obserwuje jego punkt na tarczy.
+
+#### 3.5.2. Połączenia ESP32 ↔ MPU-6050
+
+| MPU-6050 | ESP32-C3 | Funkcja |
+|----------|----------|---------|
+| VCC | 3V3 | Zasilanie modułu IMU napięciem 3,3 V |
+| GND | GND | Wspólna masa modułu IMU i ESP32 |
+| SDA | GPIO4 | Magistrala I²C — dane |
+| SCL | GPIO5 | Magistrala I²C — zegar |
+| INT | GPIO6 | Sygnał gotowości nowej próbki (`data-ready`) |
+| AD0 | niepodłączony na schemacie | Wybór adresu I²C; rzeczywisty stan na module do sprawdzenia |
+| XDA, XCL | niepodłączone | Pomocnicza magistrala I²C — niewykorzystywana |
+
+MPU-6050 komunikuje się z ESP32 przez I²C. Przewód `INT` umożliwia wyzwalanie odczytu przy pojawieniu się nowego pomiaru, zamiast odpytywania czujnika w stałym interwale programowym. Szczegóły próbkowania oraz format danych opisano w §3.6 i §5.3.
+
+**[DO WERYFIKACJI]** Zastosowany moduł MPU-6050 musi poprawnie współpracować z poziomami logicznymi 3,3 V. Należy sprawdzić obecność rezystorów podciągających I²C i sposób ustalenia stanu `AD0` na konkretnej płytce.
+
+#### 3.5.3. Detekcja spustu przez optoizolator
+
+| Połączenie | Opis |
+|------------|------|
+| Obwód repliki → R1 (1,5 kΩ) → wejście diody optoizolatora | Aktywacja obwodu spustu powoduje przepływ prądu przez diodę optoizolatora |
+| Wyjście tranzystorowe optoizolatora → GPIO7 | Cyfrowy sygnał spustu dla ESP32 |
+| GPIO7 → R2 (10 kΩ) → 3V3 | Podciągnięcie wejścia do stanu wysokiego |
+| Emiter tranzystora optoizolatora → GND ESP32 | Punkt odniesienia wyjścia optoizolatora |
+
+Przy założeniu typowej pracy fototranzystora jako wyjścia otwarty kolektor:
+
+- **stan nieaktywny:** `GPIO7 = HIGH` (podciągnięcie rezystorem R2),
+- **aktywacja spustu:** `GPIO7 = LOW` (przewodzenie fototranzystora),
+- zdarzenie rejestrowane jest na **zboczu opadającym**, z timestampem pobranym możliwie blisko chwili jego wykrycia.
+
+Obwód repliki i obwód ESP32 pozostają od siebie odseparowane przez optoizolator. Nie należy łączyć mas tych obwodów dodatkowymi przewodami, jeśli separacja ma być zachowana.
+
+**[DO WERYFIKACJI]** Polaryzacja wejścia, rozmieszczenie wyprowadzeń i dopuszczalny prąd diody muszą zostać potwierdzone z dokumentacją konkretnego optoizolatora. Sygnał odpowiada elektrycznej aktywacji obwodu spustu, a nie bezpośredniemu pomiarowi chwili opuszczenia lufy przez kulkę.
+
+#### 3.5.4. Zasilanie
+
+Moduł pomiarowy ESP32 i układ IMU są zasilane z akumulatora Li-Po 3,7 V / 300 mAh. Replika korzysta z oddzielnego akumulatora Li-Po 7,4 V / 1600 mAh. Połączenie pomiędzy obwodami realizowane jest przez optoizolator.
+
+**[DO WERYFIKACJI]** Na schemacie akumulator 3,7 V jest podłączony do wejścia oznaczonego `BAT`. Przed uruchomieniem trzeba potwierdzić, że konkretny wariant płytki ESP32-C3 posiada odpowiednie wejście akumulatorowe, zabezpieczenie Li-Po i — jeśli planowane jest ładowanie przez USB płytki — układ ładowania. Samo oznaczenie `BAT` nie potwierdza obsługi ładowania.
+
+#### 3.5.5. Ograniczenia i zakres
+
+- Schemat obejmuje: zasilanie, MPU-6050 oraz detekcję spustu.
+- Wskaźnik laserowy jest niezależny od ESP32; nie przewiduje się jego sterowania przez mikrokontroler.
+- Układ służy do rejestracji ruchu i sygnału elektrycznego spustu; rzeczywiste opóźnienie między sygnałem spustu a wystrzałem wymaga osobnej oceny.
+oading 01_uklad_ESP32_rozdzial_3_5.md…]()
+
+### 3.6. Komunikacja ESP32 ↔ MPU-6050 i pozyskiwanie próbek
+
+#### 3.6.1. Interfejs i konfiguracja
+
+ESP32-C3 pełni funkcję kontrolera magistrali **I²C**, a MPU-6050 — urządzenia podrzędnego. Wykorzystywane są linie `SDA` (`GPIO4`), `SCL` (`GPIO5`) i dodatkowy sygnał przerwania `INT` (`GPIO6`).
+
+| Parametr | Wartość / założenie |
+|----------|----------------------|
+| Protokół | I²C |
+| Adres MPU-6050 | `0x68` przy `AD0 = LOW`, `0x69` przy `AD0 = HIGH` — odczytać/skonfigurować zgodnie z modułem |
+| Częstotliwość magistrali | 400 kHz jako ustawienie docelowe; w razie problemów 100 kHz |
+| Częstotliwość wyjściowa próbek | **100 Hz na początek**, możliwość testów przy 200 Hz |
+| Synchronizacja próbkowania | `DATA_RDY` na wyjściu `INT` MPU-6050 |
+| Format pomiaru | 6 surowych wartości `int16`: `ax`, `ay`, `az`, `gx`, `gy`, `gz` |
+| Timestamp próbki | `t_us` (`int64`), zegar `esp_timer_get_time()` |
+
+Wartości częstotliwości próbkowania i zakresów pomiarowych należy traktować jako **parametry konfiguracyjne**, które zostaną zweryfikowane eksperymentalnie.
+
+#### 3.6.2. Sekwencja odczytu
+
+1. Po uruchomieniu ESP32 inicjalizuje I²C, identyfikuje MPU-6050 (rejestr `WHO_AM_I`) i wyprowadza czujnik ze stanu uśpienia.
+2. ESP32 ustawia częstotliwość próbkowania, zakresy akcelerometru i żyroskopu oraz włącza przerwanie `DATA_RDY`.
+3. MPU-6050 aktualizuje rejestry pomiarowe i sygnalizuje dostępność próbki na linii `INT`.
+4. Obsługa przerwania po stronie ESP32 zapisuje timestamp `t_us` i sygnalizuje zadaniu odczytowemu dostępność próbki.
+5. Zadanie odczytowe pobiera przez I²C **14 kolejnych bajtów** od rejestru `ACCEL_XOUT_H` (`0x3B`) do `GYRO_ZOUT_L` (`0x48`). Obejmują one osie akcelerometru, temperaturę (2 B) i osie żyroskopu. Temperatura nie jest obecnie wysyłana.
+6. Sześć wartości pomiarowych typu `int16` i timestamp zostają dodane do bufora transmisyjnego.
+7. Po zgromadzeniu zadanej liczby próbek ESP32 wysyła paczkę `IMU` do laptopa zgodnie z §5.3.
+
+Timestamp odpowiada zgłoszeniu `DATA_RDY` przez MPU-6050, a nie chwili zakończenia transmisji I²C ani wysyłki WiFi. Opóźnienie między wewnętrznym wykonaniem pomiaru a sygnałem `DATA_RDY` wymaga charakterystyki lub kalibracji, jeśli ma znaczenie dla budżetu dokładności.
+
+#### 3.6.3. Dane i przeliczanie jednostek
+
+| Nazwa | Typ surowy | Znaczenie | Jednostka po przeliczeniu |
+|-------|------------|-----------|---------------------------|
+| `ax`, `ay`, `az` | `int16` | Przyspieszenie w trzech osiach | `g` lub `m/s²` |
+| `gx`, `gy`, `gz` | `int16` | Prędkość kątowa w trzech osiach | `°/s` lub `rad/s` |
+| `t_us` | `int64` | Czas próbki w domenie ESP32 | µs od uruchomienia |
+
+Po stronie ESP32 wysyłane są **wartości surowe**; laptop może przeliczyć je na jednostki fizyczne z uwzględnieniem skonfigurowanych zakresów. Pozwala to zachować dane źródłowe do późniejszej analizy i kalibracji.
+
+Przykładowe czułości MPU-6050 (zależne od zakresu): akcelerometr ±2 g — 16384 LSB/g; żyroskop ±250 °/s — 131 LSB/(°/s). Dokładne ustawienia zakresów zostaną ustalone podczas implementacji i muszą być przekazane odbiornikowi albo utrwalone w metadanych sesji.
+
+#### 3.6.4. Obsługa błędów
+
+- W przypadku niepowodzenia odczytu I²C próbka nie może być oznaczana jako poprawna.
+- Nadmiarowe przerwania lub przepełnienie kolejki/bufora są zliczane w `imu_overruns`.
+- Należy odnotowywać błędy I²C i przerwy w próbkowaniu; odbiornik powinien móc wykryć brakujące próbki.
+- Do oceny jakości rejestracji zapisuje się rzeczywiste odstępy między timestampami, nie tylko nominalne 100 Hz.
+
+**[DO USTALENIA]** Sposób identyfikowania kolejnych próbek IMU w przypadku strat (np. dodatkowe `sample_id` albo licznik próbek w paczce) oraz finalne zakresy pomiarowe.
+_komunikacja_ESP32_MPU_rozdzial_3_6.md…]()
 
 ---
 
