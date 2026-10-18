@@ -54,6 +54,35 @@ cd ~/projekt/rpi
 ~/.local/bin/uv run camera_check.py --seconds 60
 ```
 
+## Podgląd na żywo
+
+Do ustawienia kamery i ostrości: docelowy tryb sensora i 120 fps, ale skompresowany H.264
+(ok. 6–10 Mbit/s, działa po WiFi). Nie jest to docelowy tor (bez kompresji, §5.4).
+
+Na Pi (czeka na połączenie; kończy się po zamknięciu odtwarzacza):
+
+```sh
+rpicam-vid -t 0 -n --mode 1536:864:10:P --width 640 --height 360 --framerate 120 \
+  --autofocus-mode continuous \
+  --codec h264 --bitrate 10000000 --inline --listen -o tcp://0.0.0.0:8888
+```
+
+Na laptopie (ffplay z FFmpeg):
+
+```powershell
+ffplay -fflags nobuffer -flags low_delay -framedrop -probesize 32 -analyzeduration 0 -framerate 120 -vf setpts=0 -f h264 tcp://mgr-zuber:8888
+```
+
+- `-framerate 120` — surowy H.264 nie ma znaczników czasu, a ffplay domyślnie zakłada 25 fps,
+  przez co opóźnienie rośnie bez końca.
+- `-vf setpts=0` — wyświetlanie klatek od razu po zdekodowaniu; bez tego zaległość z bufora
+  na starcie zostaje na stałe (ok. 1 s opóźnienia).
+- `--autofocus-mode continuous` i automatyczna ekspozycja dają zwykły podgląd. Ustawienia
+  docelowe (jak w `camera_check.py`): `--shutter 2000 --gain 4 --awb daylight --saturation 0
+  --autofocus-mode manual --lens-position 0.5` — obraz jest wtedy ciemny, żeby odcinała się
+  kropka lasera. `--lens-position` w dioptriach (1/odległość w m).
+- Kamera obsługuje jeden proces naraz — podglądu nie da się uruchomić razem z `camera_check.py`.
+
 ## Test kamery — `camera_check.py`
 
 Uruchamia kamerę w docelowej konfiguracji (1536×864 @ 120 fps, stała ekspozycja 2 ms
