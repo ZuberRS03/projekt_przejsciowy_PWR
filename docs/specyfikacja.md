@@ -1,4 +1,4 @@
-[02_komunikacja_ESP32_MPU_rozdzial_3_6.md](https://github.com/user-attachments/files/33609268/02_komunikacja_ESP32_MPU_rozdzial_3_6.md)[01_uklad_ESP32_rozdzial_3_5.md](https://github.com/user-attachments/files/33609247/01_uklad_ESP32_rozdzial_3_5.md)# Specyfikacja systemu — komunikacja i synchronizacja czasu
+# Specyfikacja systemu — komunikacja i synchronizacja czasu
 
 > Dotyczy zadania [#2 Przygotowanie specyfikacji](https://github.com/ZuberRS03/projekt_przejsciowy_PWR/issues/2).
 > Status: **wersja robocza 0.1** (2026-10-15). Pozycje oznaczone **[DO USTALENIA]** wymagają decyzji zespołu.
