@@ -441,10 +441,13 @@ t_row(y)  = t_sensor_ns + y_sensor · line_time_ns + exposure_us · 1000 / 2 + C
 
 - **System:** aktualny Raspberry Pi OS Lite 64-bit.
 - **Kamera:** `python3-picamera2` z apt (nie z pip). Weryfikacja: `rpicam-hello --list-cameras`.
+  Środowisko Pythona: `uv venv --system-site-packages` (widzi `picamera2` z apt).
 - **Sieć:** statyczne IP na `eth0` (NetworkManager, `nmcli`).
 - **`/boot/firmware/config.txt`:** `dtoverlay=disable-wifi` i `dtoverlay=disable-bt` — radio RPi
   nie jest używane i nie powinno zakłócać pasma 2.4 GHz.
-- **Wydajność:** governor CPU `performance`; radiator/wentylator (120 fps + wysyłka obciążają CPU);
+- **Wydajność:** governor CPU `performance` (nadpisanie reguły udev
+  `60-ondemand-governor.rules` w `/etc/udev/rules.d/` — szczegóły i pomiary w [rpi/README.md](../rpi/README.md));
+  radiator/wentylator (120 fps + wysyłka obciążają CPU);
   kontrola `vcgencmd get_throttled` (oczekiwane `0x0`).
 - **Usługi systemd:** responder synchronizacji (UDP 5001) i nadajnik wideo (ZeroMQ 5555),
   uruchamiane automatycznie; dostęp przez SSH.
