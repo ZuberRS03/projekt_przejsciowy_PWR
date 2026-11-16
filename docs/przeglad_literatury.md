@@ -90,13 +90,25 @@ Charles Platt w trzecim wydaniu *Make: Electronics* przedstawia praktyczne ćwic
 
 **Możliwość wykorzystania w projekcie:** opisane techniki można wykorzystać przy wykonywaniu połączeń między zasilaniem, ESP32-C3, modułem MPU-6050 i układem detekcji spustu. Szczególnie ważne są trwałość połączeń, odpowiednie zabezpieczenie przewodów i eliminowanie przypadkowych przerw kontaktowych podczas ruchu repliki. Zasady montażu warto później odnieść do dokumentacji konstrukcyjnej prototypu.
 
+### 2.13. Projektowanie architektury systemów wbudowanych
+
+Marilyn Wolf w podręczniku *Computers as Components: Principles of Embedded Computing System Design* omawia metody projektowania systemów wbudowanych, uwzględniające współpracę oprogramowania ze sprzętem, organizację zadań, interfejsy wejścia i wyjścia oraz komunikację w systemach IoT. Szczególnie istotne są zagadnienia związane z projektowaniem architektury, analizą wydajności i rozdzielaniem zadań wykonywanych przez urządzenie [13].
+
+**Możliwość wykorzystania w projekcie:** podręcznik stanowi podstawę do podziału obowiązków pomiędzy ESP32-C3 i Raspberry Pi. ESP32-C3 może odpowiadać za cykliczny odczyt IMU, wykrywanie naciśnięcia spustu i nadawanie znaczników czasu, natomiast Raspberry Pi za odbiór danych, rejestrację obrazu i ich późniejsze połączenie. Opisane zasady pomagają również uzasadnić oddzielenie pozyskiwania pomiarów od transmisji sieciowej.
+
+### 2.14. Organizacja zadań i ograniczenia czasowe systemu
+
+Jane W. S. Liu w podręczniku *Real-Time Systems* przedstawia podstawy projektowania systemów czasu rzeczywistego, w tym planowanie zadań okresowych i sporadycznych, analizę czasów odpowiedzi, opóźnienia oraz zjawisko jitteru. Omawia także wpływ harmonogramowania zadań na dotrzymywanie ograniczeń czasowych w systemach komputerowych [14].
+
+**Możliwość wykorzystania w projekcie:** zagadnienia te pozwalają zaplanować obsługę pomiarów IMU oraz zdarzenia spustu tak, aby czynności komunikacyjne nie powodowały nadmiernych opóźnień akwizycji. Pomogą też określić metryki testowe, takie jak odstępy między kolejnymi pomiarami, jitter próbkowania i opóźnienie rejestracji zdarzenia. Ponieważ ESP32-C3 i Raspberry Pi nie tworzą automatycznie systemu o gwarantowanych czasach reakcji, rzeczywiste parametry trzeba sprawdzić eksperymentalnie.
+
 ## 3. Wnioski z przeglądu literatury
 
 Analizowane źródła wskazują, że problem komunikacji i synchronizacji powinien zostać rozpatrzony na kilku poziomach. Prace dotyczące protokołów IoT i podstaw sieci komputerowych pomagają porównać narzut transmisji oraz charakterystykę dostarczania niewielkich pakietów danych [1, 2, 6]. Nie rozwiązują jednak samego problemu zgodności czasowej pomiarów. Badania systemów kamera–IMU, przegląd synchronizacji zegarów i specyfikacja NTP uzasadniają stosowanie znaczników czasu, estymacji przesunięcia między zegarami i uwzględniania ich dryftu [3, 4, 5, 7].
 
 Dokumentacja techniczna ESP32-C3, czujnika MPU-6050 oraz biblioteki Picamera2 wyznacza praktyczne możliwości implementacji akwizycji danych [8, 9, 10]. Wstępnie zasadne jest, aby mikrokontroler oznaczał pomiary IMU oraz zdarzenie spustu lokalnym czasem monotonicznym, a Raspberry Pi przechowywało metadane czasowe klatek. Następnie należy estymować relację między zegarami, zidentyfikować braki próbek i połączyć dane na jednej osi czasu. Rozważane rozwiązania powinny zostać ocenione pod względem błędu synchronizacji, dryftu, utraty pakietów i opóźnień skrajnych; ich skuteczności nie można przesądzić bez pomiarów na stanowisku.
 
-Podręczniki poświęcone elektronice oraz praktycznemu montażowi uzupełniają część programowo-komunikacyjną o wymagania realizacji fizycznego prototypu [11, 12]. Szczególnie istotne jest poprawne oddzielenie sygnału spustu od wejść mikrokontrolera, prawidłowe zasilanie czujników i trwałość połączeń. W pracy należy przy tym odróżnić zalecenia literaturowe od rozwiązań, które zostaną faktycznie zaimplementowane i zweryfikowane.
+Podręczniki dotyczące architektury systemów wbudowanych i systemów czasu rzeczywistego uzupełniają przegląd o zasady podziału zadań oraz analizy ograniczeń czasowych [13, 14]. Podręczniki poświęcone elektronice oraz praktycznemu montażowi uzupełniają część programowo-komunikacyjną o wymagania realizacji fizycznego prototypu [11, 12]. Szczególnie istotne jest poprawne oddzielenie sygnału spustu od wejść mikrokontrolera, prawidłowe zasilanie czujników i trwałość połączeń. W pracy należy przy tym odróżnić zalecenia literaturowe od rozwiązań, które zostaną faktycznie zaimplementowane i zweryfikowane.
 
 ## 4. Bibliografia
 
@@ -123,3 +135,7 @@ Podręczniki poświęcone elektronice oraz praktycznemu montażowi uzupełniają
 [11] P. Horowitz, W. Hill, **„The Art of Electronics”**, wyd. 3, Cambridge University Press, 2015. https://www.cambridgebookshop.co.uk/products/the-art-of-electronics
 
 [12] C. Platt, **„Make: Electronics”**, wyd. 3, Make: Community / Maker Media, 2021. https://www.oreilly.com/library/view/make-electronics-3rd/9781680456868/
+
+[13] M. Wolf, **„Computers as Components: Principles of Embedded Computing System Design”**, wyd. 4, Morgan Kaufmann / Elsevier, 2016. https://shop.elsevier.com/books/computers-as-components/wolf/978-0-12-805387-4
+
+[14] J. W. S. Liu, **„Real-Time Systems”**, Prentice Hall, 2000. https://books.google.com/books?id=uRlOngEACAAJ
