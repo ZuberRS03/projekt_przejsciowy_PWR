@@ -7,6 +7,7 @@ kamera na Raspberry Pi 4B oraz laptop, który w czasie rzeczywistym łączy dane
 
 Pełna specyfikacja: [docs/specyfikacja.md](docs/specyfikacja.md).
 Responder synchronizacji czasu na RPi: [rpi/README.md](rpi/README.md#responder-synchronizacji-czasu--sync_responderpy).
+Nadajnik klatek kamery na RPi: [rpi/README.md](rpi/README.md#nadajnik-wideo--video_senderpy).
 
 Najważniejsze założenia:
 
