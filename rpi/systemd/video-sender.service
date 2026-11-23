@@ -1,0 +1,16 @@
+[Unit]
+Description=Nadajnik klatek kamery RPi -> laptop (ZeroMQ PUSH 5555, issue #15)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/projekt/rpi
+ExecStart=/usr/bin/python3 -u /home/admin/projekt/rpi/video_sender.py
+Restart=on-failure
+RestartSec=2
+Nice=-10
+
+[Install]
+WantedBy=multi-user.target

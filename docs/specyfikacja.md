@@ -371,16 +371,16 @@ Responder znakuje `t2` natychmiast po odbiorze, a `t3` tuż przed wysłaniem, ze
 
 | Pole metadanych | Typ | Opis |
 |-----------------|-----|------|
-| `frame_seq` | u32 | numer klatki z kamery |
+| `frame_seq` | u32 | numer klatki wyliczany z `SensorTimestamp` (luka = klatka utracona przed wysyłką; libcamera nie podaje licznika klatek) |
 | `t_sensor_ns` | i64 | `SensorTimestamp` z metadanych libcamera |
 | `exposure_us` | u32 | `ExposureTime` |
 | `frame_duration_us` | u32 | rzeczywisty okres klatki |
-| `line_time_ns` | u32 | czas odczytu jednego wiersza sensora (do korekty rolling shutter) |
+| `line_time_ns` | u32 | czas odczytu jednego wiersza sensora, do korekty rolling shutter (IMX708, tryb 1536×864: 9209 ns) |
 | `width`, `height` | u16, u16 | wymiary obrazu |
 | `sensor_rows` | u16 | liczba wierszy trybu sensora (864) — do przeliczenia wiersza obrazu na wiersz sensora |
 | `format` | u8 | `1` = Y8 (skala szarości) |
 
-Strumień: `lores` **640×360, Y8, bez kompresji** → ok. 230 KB/klatkę, ~220 Mbit/s przy 120 fps.
+Strumień: `lores` **640×360, Y8, bez kompresji** → ok. 230 KB/klatkę, ~220 Mbit/s przy 120 fps. Strumień `lores` jest skonfigurowany jako YUV420, a wysyłana jest tylko płaszczyzna Y (pierwsze 360 wierszy, stride 640).
 
 - Bez kompresji: zero opóźnienia enkodera, brak artefaktów zacierających kropkę lasera.
   Sprzętowy enkoder H.264 RPi 4 nie obsługuje 1536×864 @ 120 fps.
@@ -389,9 +389,7 @@ Strumień: `lores` **640×360, Y8, bez kompresji** → ok. 230 KB/klatkę, ~220 
   się blokuje — dlatego wysyłka odbywa się w osobnym wątku z krótką kolejką; przy jej
   przepełnieniu najstarsza klatka jest odrzucana, a strata widoczna jest po `frame_seq`.
 
-**[DO USTALENIA]** czy Python na RPi 4 utrzyma 120 fps z wysyłką (test T4). Plan B: niższa
-rozdzielczość `lores` albo detekcja kropki na RPi i wysyłanie jej współrzędnych + podglądu
-w niższym fps.
+Python na RPi 4 utrzymuje 120 fps z wysyłką: w teście T4 (10 min) nadajnik zajmuje ok. 45% jednego rdzenia (cały system ok. 15%), bez strat klatek przez Ethernet 1 Gbit i bez throttlingu — wyniki w [rpi/README.md](../rpi/README.md#wyniki-nadajnika-2026-11-23). Plan B (niższa rozdzielczość `lores` albo detekcja kropki na RPi) okazał się zbędny.
 
 ---
 
@@ -493,6 +491,6 @@ Każdy test zapisuje surowe logi (wszystkie znaczniki czasu), aby wyniki można 
 | 1 | Model akcelerometru (zakres, ODR, czy ma data-ready/FIFO) | format `IMU`, sposób próbkowania |
 | 2 | Czy laptop ma gigabitowy Ethernet (ew. adapter USB 3.0 → 1 Gbit) | wymagane dla strumienia z §5.4 |
 | 3 | Gdzie wykrywać kropkę lasera: laptop (pełny strumień) czy RPi | obciążenie sieci i RPi |
-| 4 | Czy Python na RPi utrzyma 120 fps z wysyłką (test T4) | ewentualny plan B z §5.4 |
+| 4 | Czy Python na RPi utrzyma 120 fps z wysyłką (test T4) — **rozstrzygnięte**: tak, [wyniki](../rpi/README.md#wyniki-nadajnika-2026-11-23) | plan B z §5.4 niepotrzebny |
 | 5 | Schemat elektryczny ESP32 (zapowiedziany w #2) | rozdział 3 — piny spustu, lasera, IMU |
 | 6 | Język implementacji laptopa (Python?) | — |

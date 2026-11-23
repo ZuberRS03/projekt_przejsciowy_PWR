@@ -14,9 +14,8 @@ import time
 
 from picamera2 import Picamera2
 
-SENSOR_SIZE = (1536, 864)
-LORES_SIZE = (640, 360)
-FRAME_US = 8333  # 120 fps
+from camera_config import (DEFAULT_EXPOSURE_US, DEFAULT_GAIN, DEFAULT_LENS_POSITION, FRAME_US,
+                           LORES_SIZE, configure)
 
 
 def cpu_times():
@@ -37,29 +36,14 @@ def percentile(sorted_values, p):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seconds", type=float, default=60)
-    parser.add_argument("--exposure-us", type=int, default=2000)
-    parser.add_argument("--gain", type=float, default=4.0)
-    parser.add_argument("--lens-position", type=float, default=0.5, help="dioptrie (1/m), 0 = nieskończoność")
+    parser.add_argument("--exposure-us", type=int, default=DEFAULT_EXPOSURE_US)
+    parser.add_argument("--gain", type=float, default=DEFAULT_GAIN)
+    parser.add_argument("--lens-position", type=float, default=DEFAULT_LENS_POSITION, help="dioptrie (1/m), 0 = nieskończoność")
     parser.add_argument("--csv", help="zapis surowych danych klatek")
     args = parser.parse_args()
 
     picam2 = Picamera2()
-    config = picam2.create_video_configuration(
-        main={"size": SENSOR_SIZE, "format": "YUV420"},
-        lores={"size": LORES_SIZE, "format": "YUV420"},
-        raw={"size": SENSOR_SIZE},
-        buffer_count=6,
-        controls={
-            "FrameDurationLimits": (FRAME_US, FRAME_US),
-            "AeEnable": False,
-            "AwbEnable": False,
-            "ExposureTime": args.exposure_us,
-            "AnalogueGain": args.gain,
-            "AfMode": 0,  # manual
-            "LensPosition": args.lens_position,
-        },
-    )
-    picam2.configure(config)
+    configure(picam2, args.exposure_us, args.gain, args.lens_position)
     print("Tryb sensora:", picam2.camera_configuration()["sensor"])
     picam2.start()
 

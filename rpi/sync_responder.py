@@ -12,22 +12,11 @@ import struct
 import time
 from typing import Optional, Tuple
 
-MAGIC = 0x5052
-VERSION = 1
-TYPE_SYNC_REQ = 3
-TYPE_SYNC_RESP = 4
-HEADER = struct.Struct("<HBBIq")
+from protocol import (CLOCK_NAME, HEADER, MAGIC, TYPE_SYNC_REQ, TYPE_SYNC_RESP, VERSION,  # noqa: F401 (reeksport)
+                      monotonic_ns)
+
 SYNC_RESP = struct.Struct("<HBBIqqq")
 DEFAULT_PORT = 5001
-
-if hasattr(time, "clock_gettime_ns") and hasattr(time, "CLOCK_MONOTONIC"):
-    CLOCK_NAME = "CLOCK_MONOTONIC"
-
-    def monotonic_ns() -> int:
-        return time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-else:  # Windows - tylko do testów
-    CLOCK_NAME = "time.monotonic_ns"
-    monotonic_ns = time.monotonic_ns
 
 
 def parse_sync_req(data: bytes) -> Optional[Tuple[int, int]]:
