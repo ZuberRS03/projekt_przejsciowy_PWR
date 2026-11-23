@@ -107,13 +107,13 @@ def main():
         time.sleep(args.interval)
 
     if args.malformed:
-        print(f"Błędne pakiety: odpowiedzi={bad_replies} (oczekiwano 0)")
+        print(f"Bledne pakiety: odpowiedzi={bad_replies} (oczekiwano 0)")
 
     rtts.sort()
     procs.sort()
     nan = float("nan")
-    print(f"Wysłano: {args.count}  odebrano: {received}  timeouty (straty): {timeouts}  "
-          f"niepoprawne odpowiedzi: {invalid}  spóźnione: {stale}")
+    print(f"Wyslano: {args.count}  odebrano: {received}  timeouty (straty): {timeouts}  "
+          f"niepoprawne odpowiedzi: {invalid}  spoznione: {stale}")
     print(f"RTT [us]: p50={percentile(rtts, 50):.0f} p95={percentile(rtts, 95):.0f} "
           f"max={rtts[-1] if rtts else nan:.0f} min={rtts[0] if rtts else nan:.0f}")
     print(f"Serwer t3-t2 [us]: p50={percentile(procs, 50):.1f} p95={percentile(procs, 95):.1f} "
