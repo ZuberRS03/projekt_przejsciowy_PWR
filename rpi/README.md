@@ -149,7 +149,10 @@ Wszystkie pola little-endian. Nagłówek wspólny (16 B) jest taki sam w obu wia
 
 Pi nie ma `git` ani internetu przez `eth0`, więc pliki kopiujemy z laptopa. Jednorazowo
 warto skonfigurować logowanie kluczem SSH (klucz publiczny w `~/.ssh/authorized_keys` na Pi),
-żeby `ssh`/`scp` nie pytały o hasło.
+żeby `ssh`/`scp` nie pytały o hasło. Przed pierwszym `scp` trzeba też zaakceptować klucz
+hosta Pi pod adresem IP: jedno interaktywne `ssh admin@192.168.50.10` (klucz zaakceptowany
+wcześniej tylko pod nazwą `mgr-zuber` nie wystarczy — z `BatchMode` `scp` kończy się błędem
+„Host key verification failed”).
 
 Z katalogu głównego repozytorium na laptopie (PowerShell):
 
@@ -195,6 +198,10 @@ Liczniki `odpowiedzi`, `odrzucone` i `bledy_wysylki` są narastające od startu;
 (liczba adresów IP w oknie), `t3-t2` i `srednio` dotyczą ostatniego okna. Wartości w
 przykładzie są ilustracyjne.
 
+Zegar systemowy (czas ścienny) Pi nie jest synchronizowany — Pi nie ma RTC ani internetu
+przez `eth0` (NTP nie działa), więc daty w `journalctl` mogą być nieaktualne. Nie wpływa to
+na synchronizację, która używa `CLOCK_MONOTONIC`.
+
 ### Testy
 
 | Test | Gdzie | Komenda | Co sprawdza |
@@ -214,4 +221,25 @@ przykładzie są ilustracyjne.
 
 ### Wyniki (2026-11-23)
 
-Wyniki zostaną uzupełnione po testach na Pi.
+Pi 4B na `eth0` (192.168.50.10), laptop testowy po WiFi (192.168.50.165) przez router
+`mgr_zuber`; governor `performance`, `get_throttled` = `0x0`; usługa systemd (`Nice=-10`).
+
+| Test | Wymiany (odebrane/wysłane) | RTT p50 / p95 / max | t3−t2 p50 / p95 / max | Wynik |
+|------|----------------------------|---------------------|-----------------------|-------|
+| Loopback na Pi (127.0.0.1, 1000 × co 10 ms) | 1000/1000 | 54 / 60 / 251 µs | 2,7 / 3,1 / 23,5 µs | OK |
+| Sieć laptop (WiFi) → Pi (`eth0`) (300 × co 100 ms) | 298/300 (2 timeouty, 0,67%) | 5,1 / 15,7 / 64,5 ms (min 1,6 ms) | 2,9 / 5,7 / 37,9 µs | OK |
+| Niepoprawne pakiety (5 rodzajów) + 20 wymian | 20/20, 0 odpowiedzi na błędne | 5,1 / 11,8 / 17,6 ms | 3,0 / 3,4 / 7,8 µs | OK |
+
+- Testy jednostkowe: 6/6 OK na laptopie (Python 3.10) i na Pi (Python 3.13).
+- Restart po `SIGKILL`: usługa wróciła po ok. 2 s (`NRestarts=1`).
+- Autostart po restarcie Pi (`sudo reboot`): usługa `active` ok. 22,5 s od startu jądra, bez
+  restartów; 50/50 wymian z laptopa OK (RTT p50 5,2 ms, t3−t2 p50 3,4 µs).
+
+Wnioski:
+
+- Czas obsługi po stronie RPi (t3−t2) to pojedyncze µs (max < 40 µs) — pomijalny wobec
+  budżetu synchronizacji ≤ 1 ms (spec §2).
+- Zmienność RTT i straty pochodzą z toru WiFi (laptop), nie z respondera — dlatego algorytm
+  z §4.3 filtruje próbki `RTT ≤ RTT_min + 1 ms`.
+- Responder ignoruje niepoprawne pakiety i działa dalej.
+- Wynik dla właściwego toru ESP32 → RPi zostanie zmierzony w #13.
