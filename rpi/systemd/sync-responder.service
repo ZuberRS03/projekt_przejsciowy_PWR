@@ -1,0 +1,16 @@
+[Unit]
+Description=Responder synchronizacji czasu ESP32 <-> RPi (UDP 5001, issue #12)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/projekt/rpi
+ExecStart=/usr/bin/python3 -u /home/admin/projekt/rpi/sync_responder.py
+Restart=on-failure
+RestartSec=2
+Nice=-10
+
+[Install]
+WantedBy=multi-user.target
