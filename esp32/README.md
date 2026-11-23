@@ -170,7 +170,7 @@ W teście łączności licznik `imuSkipped` osiągnął **4**, ale nie zwiększa
 
 ## Ograniczenia i dalsze prace
 
-- Synchronizacja zegara ESP32 z referencyjnym zegarem Raspberry Pi (`SYNC_REQ`/`SYNC_RESP`/`SYNC_REPORT`, UDP 5001) jest **do wykonania**.
+- Synchronizacja zegara ESP32 z referencyjnym zegarem Raspberry Pi (`SYNC_REQ`/`SYNC_RESP`/`SYNC_REPORT`, UDP 5001): responder na RPi jest gotowy ([#12](https://github.com/ZuberRS03/projekt_przejsciowy_PWR/issues/12), [rpi/README.md](../rpi/README.md#responder-synchronizacji-czasu--sync_responderpy)); strona ESP32 pozostaje **do wykonania** ([#13](https://github.com/ZuberRS03/projekt_przejsciowy_PWR/issues/13)).
 - Kalibracja IMU oraz walidacja jego dokładności i charakterystyki zamiennika `WHO_AM_I=0x72` — do wykonania.
 - Należy zweryfikować odporność komunikacji na zerwanie Wi-Fi, restarty i długotrwałą pracę, a także wykrywanie utraty próbek przed wysyłką.
 - Trzykrotna transmisja `SHOT` **nie gwarantuje** dostarczenia zdarzenia przy utracie sieci (brak ACK i trwałego bufora).

@@ -6,6 +6,7 @@ kamera na Raspberry Pi 4B oraz laptop, który w czasie rzeczywistym łączy dane
 ## Warstwa komunikacji i Raspberry Pi
 
 Pełna specyfikacja: [docs/specyfikacja.md](docs/specyfikacja.md).
+Responder synchronizacji czasu na RPi: [rpi/README.md](rpi/README.md#responder-synchronizacji-czasu--sync_responderpy).
 
 Najważniejsze założenia:
 
