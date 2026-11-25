@@ -169,7 +169,6 @@ Moduł pomiarowy ESP32 i układ IMU są zasilane z akumulatora Li-Po 3,7 V / 300
 - Schemat obejmuje: zasilanie, MPU-6050 oraz detekcję spustu.
 - Wskaźnik laserowy jest niezależny od ESP32; nie przewiduje się jego sterowania przez mikrokontroler.
 - Układ służy do rejestracji ruchu i sygnału elektrycznego spustu; rzeczywiste opóźnienie między sygnałem spustu a wystrzałem wymaga osobnej oceny.
-oading 01_uklad_ESP32_rozdzial_3_5.md…]()
 
 ### 3.6. Komunikacja ESP32 ↔ MPU-6050 i pozyskiwanie próbek
 
@@ -221,7 +220,6 @@ Przykładowe czułości MPU-6050 (zależne od zakresu): akcelerometr ±2 g — 1
 - Do oceny jakości rejestracji zapisuje się rzeczywiste odstępy między timestampami, nie tylko nominalne 100 Hz.
 
 **[DO USTALENIA]** Sposób identyfikowania kolejnych próbek IMU w przypadku strat (np. dodatkowe `sample_id` albo licznik próbek w paczce) oraz finalne zakresy pomiarowe.
-_komunikacja_ESP32_MPU_rozdzial_3_6.md…]()
 
 ---
 
@@ -303,7 +301,7 @@ weryfikuje test T1.
 
 | Offset | Pole | Typ | Opis |
 |--------|------|-----|------|
-| 0 | `magic` | u16 | `0x5052` („PR”) |
+| 0 | `magic` | u16 | `0x5052` (little-endian: bajty `52 50`, czyli „RP” w ASCII) |
 | 2 | `version` | u8 | `1` |
 | 3 | `type` | u8 | typ wiadomości (tabela niżej) |
 | 4 | `seq` | u32 | numer sekwencyjny nadawcy |
@@ -329,7 +327,9 @@ weryfikuje test T1.
 | `count` | u8 | liczba próbek (1–64) |
 | `range` | u8 | kod zakresu pomiarowego czujnika (przelicznik na g) |
 | `reserved` | u16 | 0 |
-| `samples[count]` | — | po 14 B: `t_us` (i64), `ax`, `ay`, `az` (i16, surowe) |
+| `samples[count]` | — | po **20 B**: `t_us` (i64, 8 B), `ax`, `ay`, `az`, `gx`, `gy`, `gz` (6 × i16 = 12 B; wartości surowe) |
+
+Dla domyślnego `count = 5` pakiet `IMU` zajmuje **120 B**: nagłówek 16 B + metadane 4 B + pięć próbek po 20 B. Wszystkie pola pozostają w kolejności określonej w tabeli, bez wyrównania między polami.
 
 **`SHOT`** — zdarzenie spustu.
 
