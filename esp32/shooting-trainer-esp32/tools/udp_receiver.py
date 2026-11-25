@@ -11,6 +11,7 @@ VERSION = 1
 
 TYPE_IMU = 1
 TYPE_SHOT = 2
+TYPE_SYNC_REPORT = 5
 TYPE_STATUS = 6
 
 HEADER = struct.Struct("<HBBIq")
@@ -18,6 +19,7 @@ IMU_META = struct.Struct("<BBH")
 IMU_SAMPLE = struct.Struct("<qhhhhhh")
 SHOT = struct.Struct("<IqB3x")
 STATUS = struct.Struct("<HbBI")
+SYNC_REPORT = struct.Struct("<qqqq")
 
 last_seq = None
 last_timestamp = None
@@ -30,6 +32,8 @@ missing_packets = 0
 duplicate_shots = 0
 unique_shots = 0
 invalid_packets = 0
+sync_reports = 0
+invalid_sync_reports = 0
 
 window_packets = 0
 window_samples = 0
@@ -122,6 +126,30 @@ def handle_shot(payload):
     )
 
 
+def handle_sync_report(payload):
+    global sync_reports, invalid_sync_reports
+
+    if len(payload) != SYNC_REPORT.size:
+        raise ValueError("SYNC_REPORT: niepoprawna dlugosc")
+
+    t1_us, t2_ns, t3_ns, t4_us = SYNC_REPORT.unpack(payload)
+
+    if t4_us < t1_us or t3_ns < t2_ns:
+        invalid_sync_reports += 1
+        raise ValueError("SYNC_REPORT: niepoprawna kolejnosc znacznikow")
+
+    # t1,t4 w us; t2,t3 w ns. Zachowujemy surowe znaczniki.
+    rtt_us = (t4_us - t1_us) - (t3_ns - t2_ns) / 1000.0
+    sync_reports += 1
+
+    print(
+        f"[SYNC_REPORT] #{sync_reports} "
+        f"RTT={rtt_us / 1000.0:.3f} ms | "
+        f"t1={t1_us}us t2={t2_ns}ns "
+        f"t3={t3_ns}ns t4={t4_us}us"
+    )
+
+
 def handle_status(payload):
     if len(payload) != STATUS.size:
         raise ValueError("STATUS: niepoprawna dlugosc")
@@ -180,6 +208,9 @@ def main():
                 elif msg_type == TYPE_STATUS:
                     handle_status(payload)
 
+                elif msg_type == TYPE_SYNC_REPORT:
+                    handle_sync_report(payload)
+
                 else:
                     print(f"[WARN] Nieznany typ: {msg_type}")
 
@@ -221,6 +252,7 @@ def main():
         print(f"Unikalne zdarzenia SHOT: {unique_shots}")
         print(f"Duplikaty SHOT: {duplicate_shots}")
         print(f"Niepoprawne pakiety: {invalid_packets}")
+        print(f"Odebrane SYNC_REPORT: {sync_reports}")
 
     finally:
         sock.close()

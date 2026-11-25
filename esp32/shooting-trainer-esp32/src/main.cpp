@@ -27,11 +27,21 @@ constexpr uint8_t IMU_BATCH_SIZE = 5;
 const IPAddress LAPTOP_IP(192, 168, 50, 20);
 constexpr uint16_t LAPTOP_PORT = 5000;
 
+// Osobne gniazdo UDP do synchronizacji z Raspberry Pi.
+const IPAddress RPI_IP(192, 168, 50, 10);
+constexpr uint16_t RPI_SYNC_PORT = 5001;
+constexpr uint16_t LOCAL_SYNC_PORT = 5002;
+constexpr unsigned long SYNC_PERIOD_MS = 1000;
+constexpr unsigned long SYNC_TIMEOUT_MS = 400;
+
 constexpr uint16_t MAGIC = 0x5052;
 constexpr uint8_t VERSION = 1;
 
 constexpr uint8_t TYPE_IMU = 1;
 constexpr uint8_t TYPE_SHOT = 2;
+constexpr uint8_t TYPE_SYNC_REQ = 3;
+constexpr uint8_t TYPE_SYNC_RESP = 4;
+constexpr uint8_t TYPE_SYNC_REPORT = 5;
 constexpr uint8_t TYPE_STATUS = 6;
 
 // Rejestry MPU
@@ -89,17 +99,52 @@ struct __attribute__((packed)) StatusPacket {
     uint32_t imu_overruns;
 };
 
+// Pakiet zgodny z rpi/sync_responder.py:
+// header.t_send = t3_ns, seq skopiowany z SYNC_REQ.
+struct __attribute__((packed)) SyncResponsePacket {
+    PacketHeader header;
+    int64_t t1_us;
+    int64_t t2_ns;
+};
+
+struct __attribute__((packed)) SyncReportPacket {
+    PacketHeader header;
+    int64_t t1_us;
+    int64_t t2_ns;
+    int64_t t3_ns;
+    int64_t t4_us;
+};
+
 static_assert(sizeof(PacketHeader) == 16, "Header size");
 static_assert(sizeof(ImuSample) == 20, "IMU sample size");
 static_assert(sizeof(ImuPacket) == 120, "IMU packet size");
 static_assert(sizeof(ShotPacket) == 32, "SHOT packet size");
 static_assert(sizeof(StatusPacket) == 24, "STATUS packet size");
+static_assert(sizeof(SyncResponsePacket) == 32, "SYNC_RESP packet size");
+static_assert(sizeof(SyncReportPacket) == 48, "SYNC_REPORT packet size");
 
 // =====================================
 // Stan aplikacji
 // =====================================
 
 WiFiUDP udp;
+WiFiUDP syncUdp;
+
+bool syncSocketReady = false;
+bool syncPending = false;
+uint32_t syncReqSequence = 0; // NIE zmienia sequenceNumber do laptopa
+uint32_t pendingSyncSeq = 0;
+int64_t pendingSyncT1Us = 0;
+unsigned long lastSyncSentMs = 0;
+unsigned long lastSyncBindAttemptMs = 0;
+unsigned long syncPendingSinceMs = 0;
+
+uint32_t syncRequests = 0;
+uint32_t syncReports = 0;
+uint32_t syncTimeouts = 0;
+uint32_t syncInvalid = 0;
+uint32_t syncSendErrors = 0;
+int64_t lastSyncRttUs = -1;
 
 QueueHandle_t imuQueue = nullptr;
 QueueHandle_t triggerQueue = nullptr;
@@ -278,13 +323,35 @@ void updateWifi() {
         Serial.print("[WIFI] Connected, IP: ");
         Serial.println(WiFi.localIP());
 
-        Serial.print("[UDP] Destination: ");
+        Serial.print("[UDP] Laptop: ");
         Serial.print(LAPTOP_IP);
         Serial.printf(":%u\n", LAPTOP_PORT);
+
+        // Ponowne otwarcie gniazda po przywroceniu Wi-Fi.
+        syncPending = false;
+        syncSocketReady = false;
+        lastSyncBindAttemptMs = 0;
     }
 
     if (!connected && wasWifiConnected) {
         Serial.println("[WIFI] Disconnected");
+        syncUdp.stop();
+        syncSocketReady = false;
+        syncPending = false;
+    }
+
+    if (connected && !syncSocketReady &&
+        (lastSyncBindAttemptMs == 0 ||
+         millis() - lastSyncBindAttemptMs >= 5000)) {
+        lastSyncBindAttemptMs = millis();
+        syncSocketReady = syncUdp.begin(LOCAL_SYNC_PORT) == 1;
+        if (syncSocketReady) {
+            // Pierwsze zapytanie mozna wyslac od razu.
+            lastSyncSentMs = millis() - SYNC_PERIOD_MS;
+            Serial.printf("[SYNC] Listening on UDP %u\n", LOCAL_SYNC_PORT);
+        } else {
+            Serial.println("[SYNC] Cannot open local UDP port");
+        }
     }
 
     if (!connected && millis() - lastReconnect >= 5000) {
@@ -331,6 +398,121 @@ bool sendPacket(const void *data, size_t size) {
     }
 
     return ok;
+}
+
+// =====================================
+// Synchronizacja z RPi (UDP 5001)
+// =====================================
+
+void startSyncRequest() {
+    if (!syncSocketReady || syncPending ||
+        WiFi.status() != WL_CONNECTED) return;
+
+    unsigned long nowMs = millis();
+    if (nowMs - lastSyncSentMs < SYNC_PERIOD_MS) return;
+
+    // beginPacket przygotowuje datagram; faktyczna wysylka jest
+    // w endPacket. t1 pobieramy mozliwie blisko wyslania.
+    if (!syncUdp.beginPacket(RPI_IP, RPI_SYNC_PORT)) {
+        syncSendErrors++;
+        lastSyncSentMs = nowMs;
+        return;
+    }
+
+    PacketHeader request = {};
+    request.magic = MAGIC;
+    request.version = VERSION;
+    request.type = TYPE_SYNC_REQ;
+    request.seq = syncReqSequence++;
+    request.t_send = esp_timer_get_time(); // t1_us
+
+    bool ok = syncUdp.write(
+        reinterpret_cast<const uint8_t *>(&request),
+        sizeof(request)) == sizeof(request);
+    ok = syncUdp.endPacket() == 1 && ok;
+
+    lastSyncSentMs = millis();
+    if (!ok) {
+        syncSendErrors++;
+        return;
+    }
+
+    pendingSyncSeq = request.seq;
+    pendingSyncT1Us = request.t_send;
+    syncPendingSinceMs = lastSyncSentMs;
+    syncPending = true;
+    syncRequests++;
+}
+
+void handleSyncResponse() {
+    if (!syncSocketReady || WiFi.status() != WL_CONNECTED) return;
+
+    // Maksymalnie dwa datagramy na obieg loop, by nie blokowac IMU.
+    for (int i = 0; i < 2; i++) {
+        int len = syncUdp.parsePacket();
+        if (len <= 0) return;
+
+        // t4: najwczesniejszy moment dostepny aplikacji po odbiorze UDP.
+        int64_t t4_us = esp_timer_get_time();
+        IPAddress remoteIp = syncUdp.remoteIP();
+        uint16_t remotePort = syncUdp.remotePort();
+
+        if (len != (int)sizeof(SyncResponsePacket)) {
+            syncInvalid++;
+            while (syncUdp.available()) syncUdp.read();
+            continue;
+        }
+
+        SyncResponsePacket response = {};
+        int bytesRead = syncUdp.read(
+            reinterpret_cast<uint8_t *>(&response),
+            sizeof(response));
+
+        bool valid = bytesRead == (int)sizeof(response) &&
+            remoteIp == RPI_IP && remotePort == RPI_SYNC_PORT &&
+            response.header.magic == MAGIC &&
+            response.header.version == VERSION &&
+            response.header.type == TYPE_SYNC_RESP &&
+            syncPending &&
+            response.header.seq == pendingSyncSeq &&
+            response.t1_us == pendingSyncT1Us &&
+            response.t2_ns <= response.header.t_send &&
+            t4_us >= pendingSyncT1Us;
+
+        if (!valid) {
+            syncInvalid++;
+            continue;
+        }
+
+        // t3 = header.t_send, timestamp zegara Raspberry Pi w ns.
+        syncPending = false;
+        int64_t t1_us = response.t1_us;
+        int64_t t2_ns = response.t2_ns;
+        int64_t t3_ns = response.header.t_send;
+
+        SyncReportPacket report = {};
+        report.header = makeHeader(TYPE_SYNC_REPORT);
+        report.t1_us = t1_us;
+        report.t2_ns = t2_ns;
+        report.t3_ns = t3_ns;
+        report.t4_us = t4_us;
+
+        if (sendPacket(&report, sizeof(report))) {
+            syncReports++;
+        }
+
+        // Diagnostyczny RTT w domenie jednostek ESP (us).
+        lastSyncRttUs = (t4_us - t1_us) -
+                        (t3_ns - t2_ns) / 1000;
+    }
+}
+
+void checkSyncTimeout() {
+    if (syncPending &&
+        millis() - syncPendingSinceMs >= SYNC_TIMEOUT_MS) {
+        syncPending = false;
+        syncTimeouts++;
+    }
 }
 
 // =====================================
@@ -521,6 +703,16 @@ void printStatus() {
         (unsigned long)sequenceNumber
     );
 
+    Serial.printf(
+        "SYNC: req=%lu report=%lu timeout=%lu invalid=%lu send_err=%lu RTT=%lld us\n",
+        (unsigned long)syncRequests,
+        (unsigned long)syncReports,
+        (unsigned long)syncTimeouts,
+        (unsigned long)syncInvalid,
+        (unsigned long)syncSendErrors,
+        (long long)lastSyncRttUs
+    );
+
     imuSamples = 0;
     i2cErrors = 0;
     rawTriggerEdges = 0;
@@ -585,6 +777,9 @@ void loop() {
     processImu();
 
     updateWifi();
+    handleSyncResponse();
+    checkSyncTimeout();
+    startSyncRequest();
     sendPendingShots();
 
     if (millis() - lastStatus >= 1000) {
