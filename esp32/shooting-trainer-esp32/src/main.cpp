@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "wifi_credentials.h"
+#include "esp_wifi.h"
 
 // =====================================
 // Konfiguracja
@@ -319,6 +320,15 @@ void updateWifi() {
 
     if (connected && !wasWifiConnected) {
         WiFi.setSleep(false);
+
+        wifi_ps_type_t psMode;
+
+        if (esp_wifi_get_ps(&psMode) == ESP_OK) {
+            Serial.printf(
+                "[WIFI] Power save mode: %d (0 = disabled)\n",
+                static_cast<int>(psMode)
+            );
+        }
 
         Serial.print("[WIFI] Connected, IP: ");
         Serial.println(WiFi.localIP());
@@ -728,6 +738,7 @@ void printStatus() {
 
 void setup() {
     Serial.begin(115200);
+    Serial.setTxTimeoutMs(0);  // Nie blokuj programu przy braku odbiorcy USB
     delay(2000);
 
     Serial.println("=== SHOOTING TRAINER ESP32 ===");
