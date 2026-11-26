@@ -1,0 +1,2 @@
+# Zaleznosc odbiornika ZeroMQ (#16). #14 uzywa tylko standardowej biblioteki.
+pyzmq>=25

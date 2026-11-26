@@ -1,83 +1,189 @@
-# Laptop — synchronizacja zegarów (issue #14)
+# Laptop — synchronizacja i korelacja strumieni (issue #14 + #16)
 
-Ten katalog zawiera odbiornik UDP na **laptop Windows** oraz model zegara ESP32 względem
-`CLOCK_MONOTONIC` Raspberry Pi. Wykorzystuje **istniejące** pakiety `SYNC_REPORT`
-wychodzące z ESP32. Kod ESP32 i serwera RPi pozostaje bez zmian.
+Ten katalog zawiera program uruchamiany **na laptopie Windows**. Łączy pakiety UDP
+z ESP32 (`IMU`, `SHOT`, `STATUS`, `SYNC_REPORT`) oraz klatki z Raspberry Pi
+(`VIDEO_FRAME`, ZeroMQ PULL). Podstawą czasową jest `CLOCK_MONOTONIC` RPi.
 
-## Struktura
+**Zakres #16:** komunikacja, buforowanie, korelacja czasowa i diagnostyka.
+**Poza zakresem:** wykrywanie punktu laserowego, analiza obrazu i kalibracja C.
+
+## Pliki
 
 ```text
 laptop/
-├── receiver.py              # UDP 5000: IMU, SHOT, STATUS, SYNC_REPORT
-├── clock_sync.py            # okno 60 s, filtr RTT, regresja, konwersja czasu
+├── receiver.py             # istniejący odbiornik UDP + clock_sync (#14)
+├── clock_sync.py           # istniejący model ESP32 -> RPi (#14)
+├── video_stream.py         # NOWE: odbiór/validacja ZeroMQ VIDEO_FRAME
+├── correlation.py          # NOWE: watermark, bufory, powiązanie SHOT/IMU z klatką
+├── integrated_receiver.py  # NOWE: uruchomienie UDP + ZeroMQ + logowanie wyników
+├── .gitignore
 ├── tests/
-│   └── test_clock_sync.py   # testy jednostkowe na danych syntetycznych
+│   ├── test_clock_sync.py
+│   ├── test_receiver.py
+│   ├── test_correlation.py
+│   ├── test_video_stream.py
+│   └── test_integration16.py
 └── README.md
 ```
 
-## Uruchomienie (PowerShell w katalogu głównym repozytorium)
+Nie modyfikujemy firmware ESP32 ani skryptów RPi. Zachowujemy `receiver.py`
+i `clock_sync.py` z działającego zadania #14.
 
-1. Upewnij się, że ESP32 wysyła UDP do laptopa `192.168.50.20:5000`,
-   a serwer synchronizacji RPi działa pod `192.168.50.10:5001`.
-2. **Zamknij** stary `esp32/shooting-trainer-esp32/tools/udp_receiver.py`.
-   Tylko jeden odbiornik może zajmować port UDP 5000 na laptopie.
-3. Uruchom testy jednostkowe:
+## Krok 1 — sprawdzenie urządzeń
 
-   ```powershell
-   python -m unittest discover -s laptop/tests -v
-   ```
+- ESP32: `192.168.50.30` (Wi-Fi); wysyła UDP do `192.168.50.20:5000`.
+- RPi: `192.168.50.10` (Ethernet); `sync-responder.service` obsługuje UDP 5001;
+  `video-sender.service` nadaje klatki po `tcp://192.168.50.10:5555`.
+- Laptop: `192.168.50.20` (Ethernet).
 
-4. Uruchom nowy odbiornik:
+Na laptopie uruchom PowerShell:
 
-   ```powershell
-   python laptop/receiver.py --csv laptop/logs/sync.csv
-   ```
+```powershell
+ssh admin@192.168.50.10
+```
 
-   `--csv` jest opcjonalne; przechowuje raporty do późniejszej analizy. Folder `logs/`
-   należy ignorować w repozytorium.
+Na RPi:
 
-5. Obserwuj przez 70–90 sekund. Przez pierwsze raporty zobaczysz `[SYNC] WAITING`,
-   a po zebraniu 10 **przefiltrowanych** pomiarów `[SYNC] READY`.
-   Gdy filtr odrzuca wiele raportów, osiągnięcie READY może potrwać dłużej.
+```bash
+sudo systemctl status sync-responder.service
+sudo systemctl status video-sender.service
+```
 
-## Zasada działania, zgodna z §4.3 specyfikacji
+Obie usługi powinny mieć `active (running)`. Jeżeli kamera nie nadaje, sprawdź:
 
-- `t1`, `t4` — ESP32 (`esp_timer_get_time()`), mikrosekundy.
-- `t2`, `t3` — Raspberry Pi (`CLOCK_MONOTONIC`), nanosekundy.
-- `RTT = (t4-t1) - (t3-t2)/1000`, jednostka µs.
-- Punkty regresji: `x=(t1+t4)/2`, `y=(t2+t3)/2000` (µs).
-- Utrzymywane jest okno 60 s, filtr `RTT <= min(RTT) + 1000 µs`.
-  Pomiar wygasa również bez nowych SYNC_REPORT, gdy nadal przychodzą dane IMU/STATUS.
-- Regresja liniowa: `t_rpi_us = a * t_esp_us + b`.
-- Model jest gotowy po co najmniej 10 pomiarach po filtracji.
-- Wykrycie restartu ESP32 (spadek epoki i sekwencji) zeruje model.
+```bash
+sudo journalctl -u video-sender.service -n 50 --no-pager
+```
 
-Wynik `t_rpi_ns` jest w nanosekundach zegara RPi, czyli w domenie czasu
-metadanych `SensorTimestamp` kamery. Nie jest to czas kalendarzowy.
+W razie potrzeby usługę nadajnika można uruchomić przez
+`sudo systemctl start video-sender.service`. Restart RPi nie jest potrzebny.
 
-## Diagnostyka
+## Krok 2 — instalacja i testy na laptopie
 
-- `[RECEIVER]`: pakiety/s, próbki/s, raporty/s, luki w `seq`, błędy pakietów.
-- `[SYNC] WAITING`: model ma mniej niż 10 pomiarów po filtracji.
-- `[SYNC] READY`: aktualne parametry `a`, `b`, dryf w ppm i RMS reszt w µs.
-- `[IMU]`: timestamp ESP oraz timestamp przeliczony na zegar RPi (lub UNSYNCED).
-- `[SHOT]`: jedno zdarzenie po usunięciu duplikatów, przeliczenie czasu jeśli READY.
-- `[RESTART]`: wykryto restart ESP32; dane poprzedniej epoki odrzucone.
+PowerShell, **w głównym katalogu `projekt_przejsciowy_PWR`**:
 
-**RMS reszt NIE jest dokładnością synchronizacji.** Rzeczywisty błąd wymaga
-niezależnego pomiaru zgodnego z testem T1 specyfikacji, najlepiej wspólnym
-sygnałem elektrycznym rejestrowanym przez dwa urządzenia. Nie deklarujemy
-osiągnięcia 1 ms na podstawie samego modelu.
+```powershell
+python -m pip install pyzmq
+python -m unittest discover -s laptop/tests -v
+```
 
-## Sposób sprawdzenia zadania #14
+Nie uruchamiaj równolegle starego odbiornika UDP (`esp32/.../udp_receiver.py`)
+ani `laptop/receiver.py` z `integrated_receiver.py`, ponieważ port UDP `5000`
+może być zajęty tylko przez jeden proces. Podobnie odbiornik `rpi/video_receiver.py`
+nie powinien działać równolegle (ZeroMQ PULL rozdziela klatki pomiędzy odbiorcami).
 
-- [ ] Testy jednostkowe modelu przechodzą bez błędów.
-- [ ] Po uruchomieniu odbiornika jest `SYNC_REPORT` i model przechodzi w READY.
-- [ ] Wyświetlane są RTT, dryf, współczynnik a i offset b.
-- [ ] Timestamp IMU przelicza się na zegar RPi; SHOT po teście także.
-- [ ] Zatrzymanie serwera RPi nie zatrzymuje IMU; model może korzystać z
-      ostatniego dopasowania tylko dopóki dane mieszczą się w oknie.
-- [ ] Po restarcie ESP32 model wraca do WAITING i ponownie przechodzi w READY.
-- [ ] Odbiór danych nie jest blokowany przez obliczenia modelu.
+## Krok 3 — uruchomienie całości
 
-Dane wideo i korelacja z klatkami zostają na później (issue #16).
+```powershell
+python laptop/integrated_receiver.py --sync-csv laptop/logs/sync.csv --matches-csv laptop/logs/matches.csv
+```
+
+Opcjonalnie, aby zapisać ostatni surowy obraz do pliku PGM i upewnić się, że bajty
+Y8 docierają poprawnie:
+
+```powershell
+python laptop/integrated_receiver.py --save-last-pgm laptop/logs/last_frame.pgm
+```
+
+PGM to prosty obraz w skali szarości (640 × 360), który można otworzyć m.in.
+w programach graficznych obsługujących format PGM. Zapis następuje po `Ctrl+C`.
+W normalnym trybie program **nie gromadzi bajtów obrazów**: buforuje jedynie
+metadane, co pozwala uniknąć zużywania pamięci przy ~120 fps × 230 KB.
+
+## Krok 4 — test funkcjonalny
+
+1. Zostaw ESP32 i RPi włączone oraz — przy obecnym firmware — otwarty Serial Monitor
+   ESP32 (wcześniej test bez monitora ujawnił okresowe przerwy w transmisji).
+2. Uruchom program i sprawdź, czy `[VIDEO] frames/s` wynosi w przybliżeniu 120,
+   `[RECEIVER] IMU samples/s` około 100, a `[RECEIVER] SYNC/s` około 1.
+3. Po zebraniu co najmniej 10 raportów SYNC po filtracji powinno pojawić się
+   `[SYNC] READY`.
+4. Zarejestruj 2–3 pojedyncze zdarzenia spustu w kontrolowanych warunkach.
+   Oczekuj wierszy `[MATCH] shot=... frame=... delta(frame-shot)=... ms`.
+5. Sprawdź `laptop/logs/matches.csv`: `status=MATCH`, `frame_seq`, timestamp
+   strzału RPi oraz różnica czasowa (ze znakiem).
+6. Zweryfikuj, że `missing_frame_seq`, `invalid`, `queue_drops` nie rosną
+   w czasie stabilnego testu (docelowe progi strat są w osobnym teście T3).
+7. Sprawdź restart ESP32: model powinien wrócić do `WAITING`; nowe strzały
+   przed odzyskaniem modelu będą oznaczone jako `UNSYNCED`, a nie błędnie dopasowane.
+
+Zakończenie: `Ctrl+C`. Program podsumuje liczbę pakietów, klatek, strat i wyników korelacji.
+
+## Format VIDEO_FRAME (rzeczywisty kod RPi)
+
+W `rpi/protocol.py` jest `VIDEO_FRAME_HEADER = '<HBBIqIqIIIHHHB'`, 47 B,
+w kolejności: nagłówek wspólny 16 B oraz `frame_seq`, `t_sensor_ns`, `exposure_us`,
+`frame_duration_us`, `line_time_ns`, `width`, `height`, `sensor_rows`, `format`.
+Druga część wiadomości to `width × height` bajtów obrazu Y8. Odbiornik sprawdza
+rozmiar, wersję, `magic`, typ i format. Funkcja `decode_parts()` odtwarza metadane.
+
+Luki **`frame_seq`** mogą oznaczać również klatki odrzucone po stronie kamery/RPi;
+luki **`seq` nagłówka** to brakujące wysłane wiadomości (obydwa są raportowane osobno).
+Przerwanie/restart nadajnika wideo zostaje rozpoznane po jego zresetowanych licznikach.
+
+## Watermark i dokładność
+
+Korelacja jest zgodna z `docs/specyfikacja.md`, §6.2–6.3:
+
+```text
+T = t_RPi(SHOT)  (z modelu synchronizacji #14)
+t_center = t_sensor_ns + sensor_rows/2 × line_time_ns + exposure_us × 1000/2 + C
+watermark: najnowsze t_sensor_ns > T + frame_duration_us × 1000
+wybór: minimalizuj |t_center − T|
+```
+
+`C=0` i `y=height/2`, ponieważ **nie analizujemy obrazu**. Rzeczywista
+korekta toru czasowego i wiersza, w którym jest kropka lasera, wymaga testu
+T2 i należy do prac wizyjnych. Stosujemy bufor metadanych 4 s oraz
+maksymalną akceptowaną różnicę 25 ms (`--max-delta-ms`), aby nie dopasowywać
+strzałów do bardzo odległych klatek. Po 5 s bez możliwości rozstrzygnięcia
+występuje `VIDEO_TIMEOUT`.
+
+Wyniki zawierają:
+- `MATCH`: dopasowano klatkę i obliczono `delta_frame_minus_shot_ns`;
+- `UNSYNCED`: brak aktualnego modelu, nie przypisujemy klatki;
+- `NO_NEAR_FRAME`: najbliższa dostępna klatka poza ustawioną tolerancją;
+- `VIDEO_TIMEOUT`: nie było klatki umożliwiającej rozstrzygnięcie;
+- `ESP_RESTART`: przerwano oczekiwanie po zmianie epoki zegara ESP;
+- `END_WITHOUT_FRAME`: program wyłączono, zanim nastąpiło rozstrzygnięcie.
+
+Do `matches.csv` trafia także jakość modelu `SYNC` z momentu zdarzenia:
+liczba pomiarów, minimalny RTT, dryf i RMS reszt. **RMS reszt nie jest
+niezależnym pomiarem rzeczywistej dokładności synchronizacji.**
+
+Bufor IMU przechowuje przeliczone czasy ostatnich 4 s, aby dla dopasowanego
+strzału wskazać najbliższą próbkę IMU (jeśli w odległości do 20 ms).
+
+## Parametry
+
+```powershell
+python laptop/integrated_receiver.py --help
+```
+
+Najważniejsze: `--video tcp://192.168.50.10:5555`, `--frame-history-s 4`,
+`--max-delta-ms 25`, `--max-wait-s 5`, `--save-last-pgm PATH`,
+`--sync-csv PATH`, `--matches-csv PATH`.
+
+## Gdy wideo nie przychodzi
+
+1. Sprawdź `sudo systemctl status video-sender.service` na RPi.
+2. Sprawdź `sudo journalctl -u video-sender.service -n 50 --no-pager`.
+3. Sprawdź czy laptop i RPi widzą się w sieci (`ping 192.168.50.10`).
+4. Nie uruchamiaj drugiego odbiornika PULL równolegle — wiadomości z PUSH
+   będą rozdzielane między odbiorców.
+5. Przy testach bez kamery możesz zatrzymać usługę i uruchomić na RPi
+   `cd ~/projekt/rpi && python3 video_sender.py --fake --seconds 60`
+   (przedtem `sudo systemctl stop video-sender.service`). Po teście
+   przywróć usługę przez `sudo systemctl start video-sender.service`.
+6. Pamiętaj, że bez `SYNC READY` strzały są logowane jako `UNSYNCED` nawet przy
+   poprawnie nadchodzących klatkach.
+
+## Definicja wykonania #16
+
+- [ ] Laptop jednocześnie otrzymuje UDP ESP32 i ZeroMQ z RPi.
+- [ ] Każda poprawna klatka ma numer i timestamp, a wideo Y8 jest możliwe do zapisania PGM.
+- [ ] Liczniki strat `seq`, `frame_seq`, `queue_drops` i `invalid` są raportowane.
+- [ ] SHOT są dopasowywane do klatek po timestampach RPi (po watermark).
+- [ ] Wynik zawiera różnicę czasową i diagnostykę synchronizacji, również przy brakach.
+- [ ] Testy jednostkowe i lokalny test ZeroMQ przechodzą bez błędów.
+- [ ] Potwierdzono poprawność w krótkim teście na sprzęcie.
